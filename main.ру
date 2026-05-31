@@ -1,0 +1,214 @@
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
+
+TOKEN = "8780910922:AAENgxNABl4ol4l6lnMvq7uw3wSivCh3ixc"
+ADMIN_ID = 5725856404
+
+users = {}
+orders = {}
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = [
+        [InlineKeyboardButton("🇹🇯 Тоҷикӣ", callback_data="lang_tj")],
+        [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")]
+    ]
+
+    await update.message.reply_text(
+        "🌍 Забонро интихоб кунед",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    await query.answer()
+
+    if query.data.startswith("lang_"):
+
+        users[user_id] = {
+            "language": query.data,
+            "registered": False,
+            "balance": 0
+        }
+
+        keyboard = [
+            [InlineKeyboardButton("📱 Регистратсия", callback_data="register")]
+        ]
+
+        await query.message.reply_text(
+            "🔐 Барои идома регистратсия кунед",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif query.data == "register":
+
+        context.user_data["waiting_phone"] = True
+
+        await query.message.reply_text(
+            "📱 Рақами телефонро фиристед"
+        )
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    if context.user_data.get("waiting_phone"):
+
+        users[user_id]["phone"] = text
+
+        context.user_data["waiting_phone"] = False
+        context.user_data["waiting_code"] = True
+
+        await update.message.reply_text(
+            "📨 Код: 1234\n\nКодро ворид кунед"
+        )
+
+    elif context.user_data.get("waiting_code"):
+
+        if text == "1234":
+
+            users[user_id]["registered"] = True
+
+            keyboard = [
+                ["📦 Бор заказ кардан"],
+                ["📋 Борҳои ман"],
+                ["💰 Баланс"],
+                ["👤 Профил"],
+                ["📞 Тамос бо админ"]
+            ]
+
+            await update.message.reply_text(
+                "✅ Регистратсия анҷом ёфт",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard,
+                    resize_keyboard=True
+                )
+            )
+
+            context.user_data["waiting_code"] = False
+
+        else:
+
+            await update.message.reply_text(
+                "❌ Код нодуруст"
+            )
+
+    elif text == "📦 Бор заказ кардан":
+
+        context.user_data["waiting_order"] = True
+
+        await update.message.reply_text(
+            "📦 Номи борро нависед"
+        )
+
+    elif context.user_data.get("waiting_order"):
+
+        if user_id not in orders:
+            orders[user_id] = []
+
+        orders[user_id].append(text)
+
+        context.user_data["waiting_order"] = False
+
+        await update.message.reply_text(
+            "✅ Бор қабул шуд"
+        )
+
+    elif text == "📋 Борҳои ман":
+
+        if user_id not in orders or len(orders[user_id]) == 0:
+
+            await update.message.reply_text(
+                "📭 Шумо бор надоред"
+            )
+
+        else:
+
+            result = "📋 Борҳои шумо:\n\n"
+
+            for i in orders[user_id]:
+                result += f"• {i}\n"
+
+            await update.message.reply_text(result)
+
+    elif text == "💰 Баланс":
+
+        balance = users[user_id]["balance"]
+
+        await update.message.reply_text(
+            f"💰 Баланси шумо: {balance}$"
+        )
+
+    elif text == "👤 Профил":
+
+        phone = users[user_id].get("phone", "Нест")
+
+        profile = f"""
+👤 Профили шумо
+
+🆔 ID: {user_id}
+📱 Телефон: {phone}
+💰 Баланс: {users[user_id]['balance']}$
+"""
+
+        await update.message.reply_text(profile)
+
+    elif text == "📞 Тамос бо админ":
+
+        await update.message.reply_text(
+            "📞 Админ: @Musalim_08"
+        )
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    text = f"""
+👑 ADMIN PANEL
+
+👥 Users: {len(users)}
+📦 Orders: {len(orders)}
+"""
+
+    await update.message.reply_text(text)
+
+def main():
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CallbackQueryHandler(buttons))
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            text_handler
+        )
+    )
+
+    print("Bot started...")
+
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
