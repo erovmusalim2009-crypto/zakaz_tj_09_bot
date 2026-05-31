@@ -1,0 +1,453 @@
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
+
+TOKEN = "8780910922:AAENgxNABl4ol4l6lnMvq7uw3wSivCh3ixc"
+ADMIN_ID = 5725856404
+
+users = {}
+orders = {}
+order_counter = 1000
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = [
+        [InlineKeyboardButton("🇹🇯 Тоҷикӣ", callback_data="lang_tj")],
+        [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")]
+    ]
+
+    await update.message.reply_text(
+        "🌍 Забонро интихоб кунед",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    await query.answer()
+
+    if query.data.startswith("lang_"):
+
+        users[user_id] = {
+            "language": query.data,
+            "registered": False
+        }
+
+        keyboard = [
+            [InlineKeyboardButton("📱 Регистратсия", callback_data="register")]
+        ]
+
+        await query.message.reply_text(
+            "🔐 Барои идома регистратсия кунед",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif query.data == "register":
+
+        context.user_data["waiting_phone"] = True
+
+        await query.message.reply_text(
+            "📱 Рақами телефонро фиристед"
+        )
+
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    global order_counter
+
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    if context.user_data.get("waiting_phone"):
+
+        users[user_id]["phone"] = text
+
+        context.user_data["waiting_phone"] = False
+        context.user_data["waiting_code"] = True
+
+        await update.message.reply_text(
+            "📨 Код: 1234\n\nКодро ворид кунед"
+        )
+
+    elif context.user_data.get("waiting_code"):
+
+        if text == "1234":
+
+            users[user_id]["registered"] = True
+
+            keyboard = [
+                ["📦 Бор заказ кардан"],
+                ["📋 Борҳои ман"],
+                ["🔍 Тафтиши бор"],
+                ["👤 Профил"],
+                ["📞 Тамос бо админ"]
+            ]
+
+            await update.message.reply_text(
+                "✅ Регистратсия анҷом ёфт",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard,
+                    resize_keyboard=True
+                )
+            )
+
+            context.user_data["waiting_code"] = False
+
+        else:
+
+            await update.message.reply_text(
+                "❌ Код нодуруст"
+            )
+
+    elif text == "📦 Бор заказ кардан":
+
+        context.user_data["waiting_product_name"] = True
+
+        await update.message.reply_text(
+            "📦 Номи борро нависед"
+        )
+
+    elif context.user_data.get("waiting_product_name"):
+
+        context.user_data["product_name"] = text
+
+        context.user_data["waiting_product_name"] = False
+        context.user_data["waiting_description"] = True
+
+        await update.message.reply_text(
+            "📝 Тавсифи борро нависед"
+        )
+
+    elif context.user_data.get("waiting_description"):
+
+        context.user_data["description"] = text
+
+        context.user_data["waiting_description"] = False
+        context.user_data["waiting_photo"] = True
+
+        await update.message.reply_text(
+            "📷 Акси борро фиристед"
+        )
+
+    elif text == "📋 Борҳои ман":
+
+        if user_id not in orders or len(orders[user_id]) == 0:
+
+            await update.message.reply_text(
+                "📭 Шумо бор надоред"
+            )
+
+        else:
+
+            result = "📋 Борҳои шумо:\n\n"
+
+            for i in orders[user_id]:
+
+                result += f"""
+🆔 ID: {i['id']}
+📦 {i['name']}
+📝 {i['description']}
+📍 Ҳолат: {i['status']}
+
+"""
+
+            await update.message.reply_text(result)
+
+    elif text == "🔍 Тафтиши бор":
+
+        context.user_data["checking_order"] = True
+
+        await update.message.reply_text(
+            "🆔 ID-и борро фиристед"
+        )
+
+    elif context.user_data.get("checking_order"):
+
+        found = False
+
+        for uid in orders:
+
+            for order in orders[uid]:
+
+                if str(order["id"]) == text:
+
+                    found = True
+
+                    await update.message.reply_text(
+                        f"""
+📦 Бор ёфт шуд
+
+🆔 ID: {order['id']}
+📦 Ном: {order['name']}
+📍 Ҳолат: {order['status']}
+"""
+                    )
+
+        if not found:
+
+            await update.message.reply_text(
+                "❌ Бор ёфт нашуд"
+            )
+
+        context.user_data["checking_order"] = False
+
+    elif text == "👤 Профил":
+
+        phone = users[user_id].get("phone", "Нест")
+
+        profile = f"""
+👤 Профили шумо
+
+🆔 ID: {user_id}
+📱 Телефон: {phone}
+"""
+
+        await update.message.reply_text(profile)
+
+    elif text == "📞 Тамос бо админ":
+
+        await update.message.reply_text(
+            "📞 Админ: +992078083535"
+        )
+
+    elif text == "📦 Ҳамаи заказҳо":
+
+        if user_id != ADMIN_ID:
+            return
+
+        total = 0
+
+        for uid in orders:
+
+            for order in orders[uid]:
+
+                total += 1
+
+                await update.message.reply_text(
+                    f"""
+📦 ЗАКАЗ
+
+🆔 ID: {order['id']}
+📦 Ном: {order['name']}
+📝 {order['description']}
+📍 Ҳолат: {order['status']}
+"""
+                )
+
+        if total == 0:
+
+            await update.message.reply_text(
+                "📭 Заказ нест"
+            )
+
+    elif text == "🚚 Дар роҳ":
+
+        if user_id != ADMIN_ID:
+            return
+
+        context.user_data["set_road"] = True
+
+        await update.message.reply_text(
+            "🆔 ID-и борро фиристед"
+        )
+
+    elif context.user_data.get("set_road"):
+
+        for uid in orders:
+
+            for order in orders[uid]:
+
+                if str(order["id"]) == text:
+
+                    order["status"] = "🚚 Дар роҳ"
+
+                    await update.message.reply_text(
+                        "✅ Статус иваз шуд"
+                    )
+
+        context.user_data["set_road"] = False
+
+    elif text == "📍 Расид ба Душанбе":
+
+        if user_id != ADMIN_ID:
+            return
+
+        context.user_data["set_dushanbe"] = True
+
+        await update.message.reply_text(
+            "🆔 ID-и борро фиристед"
+        )
+
+    elif context.user_data.get("set_dushanbe"):
+
+        for uid in orders:
+
+            for order in orders[uid]:
+
+                if str(order["id"]) == text:
+
+                    order["status"] = "📍 Расид ба Душанбе"
+
+                    await update.message.reply_text(
+                        "✅ Статус иваз шуд"
+                    )
+
+        context.user_data["set_dushanbe"] = False
+
+    elif text == "✅ Дастрас шуд":
+
+        if user_id != ADMIN_ID:
+            return
+
+        context.user_data["set_done"] = True
+
+        await update.message.reply_text(
+            "🆔 ID-и борро фиристед"
+        )
+
+    elif context.user_data.get("set_done"):
+
+        for uid in orders:
+
+            for order in orders[uid]:
+
+                if str(order["id"]) == text:
+
+                    order["status"] = "✅ Дастрас шуд"
+
+                    await update.message.reply_text(
+                        "✅ Статус иваз шуд"
+                    )
+
+        context.user_data["set_done"] = False
+
+
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    global order_counter
+
+    user_id = update.effective_user.id
+
+    if context.user_data.get("waiting_photo"):
+
+        photo = update.message.photo[-1].file_id
+
+        if user_id not in orders:
+            orders[user_id] = []
+
+        order_counter += 1
+
+        order_data = {
+            "id": order_counter,
+            "name": context.user_data["product_name"],
+            "description": context.user_data["description"],
+            "status": "⏳ Дар баррасӣ"
+        }
+
+        orders[user_id].append(order_data)
+
+        caption = f"""
+📦 Закази нав
+
+🆔 ID: {order_counter}
+
+👤 USER ID: {user_id}
+
+📦 Ном:
+{context.user_data['product_name']}
+
+📝 Тавсиф:
+{context.user_data['description']}
+
+📍 Ҳолат:
+⏳ Дар баррасӣ
+"""
+
+        await context.bot.send_photo(
+            chat_id=ADMIN_ID,
+            photo=photo,
+            caption=caption
+        )
+
+        await update.message.reply_text(
+            f"""
+✅ Дархости шумо қабул шуд
+
+⏳ Ҷавоби Админро интизор шавед
+
+🆔 ID-и бори шумо:
+{order_counter}
+"""
+        )
+
+        context.user_data["waiting_photo"] = False
+
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    keyboard = [
+        ["📦 Ҳамаи заказҳо"],
+        ["🚚 Дар роҳ"],
+        ["📍 Расид ба Душанбе"],
+        ["✅ Дастрас шуд"]
+    ]
+
+    await update.message.reply_text(
+        "👑 ADMIN PANEL",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True
+        )
+    )
+
+
+def main():
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+
+    app.add_handler(CallbackQueryHandler(buttons))
+
+    app.add_handler(
+        MessageHandler(
+            filters.PHOTO,
+            photo_handler
+        )
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            text_handler
+        )
+    )
+
+    print("Bot started...")
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
